@@ -1,25 +1,13 @@
 from typing import Protocol
 
 import os 
-import datetime 
 import asyncio
-import traceback
 import pathlib
 
 import pynvim
-from yaar import agent
-from pydantic_ai import Agent
-from pydantic_ai import Agent
-from pydantic_ai import (
-    FunctionToolCallEvent,
-    FinalResultEvent,
-    FunctionToolResultEvent,
-    PartDeltaEvent,
-    PartStartEvent,
-    TextPartDelta,
-    ThinkingPartDelta,
-    ToolCallPartDelta,
-)
+from yaar.models import Agent, Model, Session, Logging
+from yaar.tools import all_tools
+from yaar.agent import create_mcps, start_agent_with_session
 
 @pynvim.plugin
 class AiChat(object):
@@ -36,7 +24,9 @@ class AiChat(object):
 
         previous_session = args[0] if len(args) > 0 else None
 
-        system_prompt = """
+        system_prompt = f"""
+# Project
+    - root {os.getcwd()}
     - Always begin by rephrasing the user's goal in a friendly, clear, and concise manner, before calling any tools.
     - Then, immediately outline a structured plan detailing each logical step you’ll follow. - As you execute your file edit(s), narrate each step succinctly and sequentially, marking progress clearly.
     - Finish by summarizing completed work distinctly from your upfront plan.
@@ -45,20 +35,27 @@ class AiChat(object):
         monitor_buffer = self.nvim.api.create_buf(False, True) ## Not listed scratch buffer
         self.nvim.api.open_win(monitor_buffer.number, False, {'split': 'below'})#, 'row': 3, 'col': 3, 'width': 12, 'height': 3})
 
-        session = agent.Session.create_main_session(
-            agent_name='vim-agent',
+        main_agent = Agent(
+            name='Generic-ai',
+            model=Model.GPT_54_THINKING,
+            system_prompt=system_prompt,
+            description='generic llm ai',
+            toolsets=[*create_mcps(), *all_tools()],
+            api_key=self._api_key
+        )
+
+        session = Session.create_main_session(
+            session_name='vim-agent',
             path = pathlib.Path('./.session'),
             logging_factory=lambda session: VimLogging(session, BufferWriter(current_buffer), BufferWriter(monitor_buffer), self.nvim)
         )
         prompt = '\n'.join(self.nvim.current.buffer[:])
 
         asyncio.ensure_future(
-            agent.start_agent_with_session(
+            start_agent_with_session(
                 prompt=prompt,
-                agent_name='generic-ai',
-                agent_system_prompt=system_prompt,
-                mcps=agent.create_mcps(),
-                api_key=self._api_key,
+                agent=main_agent,
+                sub_agents=[],
                 session=session,
                 previous_session=previous_session
             )
@@ -115,8 +112,8 @@ class BufferWriter:
         return len(line.splitlines()) == 2
 
 
-class VimLogging(agent.Logging):
-    def __init__(self, session: agent.Session, output_writer: BufferWriter, debug_writer: BufferWriter, nvim: pynvim.Nvim):
+class VimLogging(Logging):
+    def __init__(self, session: Session, output_writer: BufferWriter, debug_writer: BufferWriter, nvim: pynvim.Nvim):
         super().__init__(session)
         self._output_writer = output_writer
         self._debug_writer = debug_writer 
