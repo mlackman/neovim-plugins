@@ -37,7 +37,7 @@ class AiChat(object):
 
         main_agent = Agent(
             name='Generic-ai',
-            model=Model.GPT_54_THINKING,
+            model=Model.GPT_55,
             system_prompt=system_prompt,
             description='generic llm ai',
             toolsets=[*create_mcps(), *all_tools()],
