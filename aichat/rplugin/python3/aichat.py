@@ -5,9 +5,12 @@ import asyncio
 import pathlib
 
 import pynvim
-from yaar.models import Agent, Model, Session, Logging
+from yaar import Session, create_session
+from yaar.session import start_agent_with_session
+from yaar.logging import LogDestinations, Logging
+from yaar.models import Agent, Model
 from yaar.tools import all_tools
-from yaar.agent import create_mcps, start_agent_with_session
+from yaar.agent import create_mcps 
 
 @pynvim.plugin
 class AiChat(object):
@@ -16,7 +19,11 @@ class AiChat(object):
         self.nvim = nvim
         api_key = os.getenv('API_KEY')
         assert api_key is not None, 'ChatGPT API_KEY not found from env vars' 
+        home = os.getenv('HOME')
+        assert home is not None, 'HOME env variable not set!'
+
         self._api_key = api_key
+        self._root_path = pathlib.Path(home) / '.local/state/yaar'
 
     @pynvim.command('Query', nargs='?')
     def query(self, args):
@@ -37,27 +44,25 @@ class AiChat(object):
 
         main_agent = Agent(
             name='Generic-ai',
-            model=Model.GPT_55,
+            model=Model.GEMINI_31_FLASH_LITE,
             system_prompt=system_prompt,
             description='generic llm ai',
-            toolsets=[*create_mcps(), *all_tools()],
+            toolsets=[*all_tools()],
             api_key=self._api_key
         )
 
-        session = Session.create_main_session(
-            session_name='vim-agent',
-            path = pathlib.Path('./.session'),
-            logging_factory=lambda session: VimLogging(session, BufferWriter(current_buffer), BufferWriter(monitor_buffer), self.nvim)
+        session = create_session(
+            name='vim-agent',
+            root_path = self._root_path,
+            logging_factory=lambda dest: VimLogging(dest, BufferWriter(current_buffer), BufferWriter(monitor_buffer), self.nvim)
         )
         prompt = '\n'.join(self.nvim.current.buffer[:])
 
-        asyncio.ensure_future(
-            start_agent_with_session(
+        self.__future = asyncio.ensure_future(
+            session.run_agent(
                 prompt=prompt,
                 agent=main_agent,
                 sub_agents=[],
-                session=session,
-                previous_session=previous_session
             )
         )
 
@@ -113,8 +118,8 @@ class BufferWriter:
 
 
 class VimLogging(Logging):
-    def __init__(self, session: Session, output_writer: BufferWriter, debug_writer: BufferWriter, nvim: pynvim.Nvim):
-        super().__init__(session)
+    def __init__(self, dests: LogDestinations, output_writer: BufferWriter, debug_writer: BufferWriter, nvim: pynvim.Nvim):
+        super().__init__(dests)
         self._output_writer = output_writer
         self._debug_writer = debug_writer 
         self._nvim = nvim
